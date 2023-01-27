@@ -1,0 +1,1167 @@
+
+
+
+    --reanimate by MyWorld#4430 discord.gg/pYVHtSJmEY
+    local v3_net, v3_808 = Vector3.new(0, 25.1, 0), Vector3.new(8, 0, 8)
+    local function getNetlessVelocity(realPartVelocity)
+        local mag = realPartVelocity.Magnitude
+        if mag > 1 then
+            local unit = realPartVelocity.Unit
+            if (unit.Y > 0.25) or (unit.Y < -0.75) then
+                return unit * (25.1 / unit.Y)
+            end
+        end
+        return v3_net + realPartVelocity * v3_808
+    end
+    local simradius = "shp" --simulation radius (net bypass) method
+    --"shp" - sethiddenproperty
+    --"ssr" - setsimulationradius
+    --false - disable
+    local simrad = 1000 --simulation radius value
+    local healthHide = false --moves your head away every 3 seconds so players dont see your health bar (alignmode 4 only)
+    local reclaim = true --if you lost control over a part this will move your primary part to the part so you get it back (alignmode 4)
+    local novoid = true --prevents parts from going under workspace.FallenPartsDestroyHeight if you control them (alignmode 4 only)
+    local physp = nil --PhysicalProperties.new(0.01, 0, 1, 0, 0) --sets .CustomPhysicalProperties to this for each part
+    local noclipAllParts = true --set it to true if you want noclip
+    local antiragdoll = true --removes hingeConstraints and ballSocketConstraints from your character
+    local newanimate = false --disables the animate script and enables after reanimation
+    local discharscripts = true --disables all localScripts parented to your character before reanimation
+    local R15toR6 = true --tries to convert your character to r6 if its r15
+    local hatcollide = true --makes hats cancollide (credit to ShownApe) (works only with reanimate method 0)
+    local humState16 = true --enables collisions for limbs before the humanoid dies (using hum:ChangeState)
+    local addtools = false --puts all tools from backpack to character and lets you hold them after reanimation
+    local hedafterneck = true --disable aligns for head and enable after neck or torso is removed
+    local loadtime = game:GetService("Players").RespawnTime + 0.5 --anti respawn delay
+    local method = 3 --reanimation method
+    --methods:
+    --0 - breakJoints (takes [loadtime] seconds to load)
+    --1 - limbs
+    --2 - limbs + anti respawn
+    --3 - limbs + breakJoints after [loadtime] seconds
+    --4 - remove humanoid + breakJoints
+    --5 - remove humanoid + limbst
+    local alignmode = 4 --AlignPosition mode
+    --modes:
+    --1 - AlignPosition rigidity enabled true
+    --2 - 2 AlignPositions rigidity enabled both true and false
+    --3 - AlignPosition rigidity enabled false
+    --4 - CFrame
+    local flingpart = "HumanoidRootPart"  --name of the part or the hat used for flinging
+
+    --the fling function
+    --usage: fling(target, duration, velocity)
+    --target can be set to: basePart, CFrame, Vector3, character model or humanoid (flings at mouse.Hit if argument not provided))
+    --duration (fling time in seconds) can be set to a number or a string convertable to the number (0.5s if not provided),
+    --velocity (fling part rotation velocity) can be set to a vector3 value (Vector3.new(20000, 20000, 20000) if not provided)
+    
+    local lp = game:GetService("Players").LocalPlayer
+    local rs, ws, sg = game:GetService("RunService"), game:GetService("Workspace"), game:GetService("StarterGui")
+    local stepped, heartbeat, renderstepped = rs.Stepped, rs.Heartbeat, rs.RenderStepped
+    local twait, tdelay, rad, inf, abs, clamp = task.wait, task.delay, math.rad, math.huge, math.abs, math.clamp
+    local cf, v3 = CFrame.new, Vector3.new
+    local angles = CFrame.Angles
+    local v3_0, cf_0 = v3(0, 0, 0), cf(0, 0, 0)
+    
+    local c = lp.Character
+    if not (c and c.Parent) then
+        return
+    end
+    
+    c:GetPropertyChangedSignal("Parent"):Connect(function()
+        if not (c and c.Parent) then
+            c = nil
+        end
+    end)
+    
+    local clone, destroy, getchildren, getdescendants, isa = c.Clone, c.Destroy, c.GetChildren, c.GetDescendants, c.IsA
+    
+    local function gp(parent, name, className)
+        if typeof(parent) == "Instance" then
+            for i, v in pairs(getchildren(parent)) do
+                if (v.Name == name) and isa(v, className) then
+                    return v
+                end
+            end
+        end
+        return nil
+    end
+    
+    local fenv = getfenv()
+    
+    local shp = fenv.sethiddenproperty or fenv.set_hidden_property or fenv.set_hidden_prop or fenv.sethiddenprop
+    local ssr = fenv.setsimulationradius or fenv.set_simulation_radius or fenv.set_sim_radius or fenv.setsimradius or fenv.setsimrad or fenv.set_sim_rad
+    
+    healthHide = healthHide and ((method == 0) or (method == 3)) and gp(c, "Head", "BasePart")
+    
+    local reclaim, lostpart = reclaim and c.PrimaryPart, nil
+    
+    local function align(Part0, Part1)
+        
+        local att0 = Instance.new("Attachment")
+        att0.Position, att0.Orientation, att0.Name = v3_0, v3_0, "att0_" .. Part0.Name
+        local att1 = Instance.new("Attachment")
+        att1.Position, att1.Orientation, att1.Name = v3_0, v3_0, "att1_" .. Part1.Name
+    
+        if alignmode == 4 then
+        
+            local hide = false
+            if Part0 == healthHide then
+                healthHide = false
+                tdelay(0, function()
+                    while twait(2.9) and Part0 and c do
+                        hide = #Part0:GetConnectedParts() == 1
+                        twait(0.1)
+                        hide = false
+                    end
+                end)
+            end
+            
+            local rot = rad(0.05)
+            local con0, con1 = nil, nil
+            con0 = stepped:Connect(function()
+                if not (Part0 and Part1) then return con0:Disconnect() and con1:Disconnect() end
+                Part0.RotVelocity = Part1.RotVelocity
+            end)
+            local lastpos = Part0.Position
+            con1 = heartbeat:Connect(function(delta)
+                if not (Part0 and Part1 and att1) then return con0:Disconnect() and con1:Disconnect() end
+                if (not Part0.Anchored) and (Part0.ReceiveAge == 0) then
+                    if lostpart == Part0 then
+                        lostpart = nil
+                    end
+                    rot = -rot
+                    local newcf = Part1.CFrame * att1.CFrame * angles(0, 0, rot)
+                    if Part1.Velocity.Magnitude > 0.01 then
+                        Part0.Velocity = getNetlessVelocity(Part1.Velocity)
+                    else
+                        Part0.Velocity = getNetlessVelocity((newcf.Position - lastpos) / delta)
+                    end
+                    lastpos = newcf.Position
+                    if lostpart and (Part0 == reclaim) then
+                        newcf = lostpart.CFrame
+                    elseif hide then
+                        newcf += v3(0, 3000, 0)
+                    end
+                    if novoid and (newcf.Y < ws.FallenPartsDestroyHeight + 0.1) then
+                        newcf += v3(0, ws.FallenPartsDestroyHeight + 0.1 - newcf.Y, 0)
+                    end
+                    Part0.CFrame = newcf
+                elseif (not Part0.Anchored) and (abs(Part0.Velocity.X) < 45) and (abs(Part0.Velocity.Y) < 25) and (abs(Part0.Velocity.Z) < 45) then
+                    lostpart = Part0
+                end
+            end)
+        
+        else
+            
+            Part0.CustomPhysicalProperties = physp
+            if (alignmode == 1) or (alignmode == 2) then
+                local ape = Instance.new("AlignPosition")
+                ape.MaxForce, ape.MaxVelocity, ape.Responsiveness = inf, inf, inf
+                ape.ReactionForceEnabled, ape.RigidityEnabled, ape.ApplyAtCenterOfMass = false, true, false
+                ape.Attachment0, ape.Attachment1, ape.Name = att0, att1, "AlignPositionRtrue"
+                ape.Parent = att0
+            end
+            
+            if (alignmode == 2) or (alignmode == 3) then
+                local apd = Instance.new("AlignPosition")
+                apd.MaxForce, apd.MaxVelocity, apd.Responsiveness = inf, inf, inf
+                apd.ReactionForceEnabled, apd.RigidityEnabled, apd.ApplyAtCenterOfMass = false, false, false
+                apd.Attachment0, apd.Attachment1, apd.Name = att0, att1, "AlignPositionRfalse"
+                apd.Parent = att0
+            end
+            
+            local ao = Instance.new("AlignOrientation")
+            ao.MaxAngularVelocity, ao.MaxTorque, ao.Responsiveness = inf, inf, inf
+            ao.PrimaryAxisOnly, ao.ReactionTorqueEnabled, ao.RigidityEnabled = false, false, false
+            ao.Attachment0, ao.Attachment1 = att0, att1
+            ao.Parent = att0
+            
+            local con0, con1 = nil, nil
+            local vel = Part0.Velocity
+            con0 = renderstepped:Connect(function()
+                if not (Part0 and Part1) then return con0:Disconnect() and con1:Disconnect() end
+                Part0.Velocity = vel
+            end)
+            local lastpos = Part0.Position
+            con1 = heartbeat:Connect(function(delta)
+                if not (Part0 and Part1) then return con0:Disconnect() and con1:Disconnect() end
+                vel = Part0.Velocity
+                if Part1.Velocity.Magnitude > 0.01 then
+                    Part0.Velocity = getNetlessVelocity(Part1.Velocity)
+                else
+                    Part0.Velocity = getNetlessVelocity((Part0.Position - lastpos) / delta)
+                end
+                lastpos = Part0.Position
+            end)
+        
+        end
+    
+        att0:GetPropertyChangedSignal("Parent"):Connect(function()
+            Part0 = att0.Parent
+            if not isa(Part0, "BasePart") then
+                att0 = nil
+                if lostpart == Part0 then
+                    lostpart = nil
+                end
+                Part0 = nil
+            end
+        end)
+        att0.Parent = Part0
+        
+        att1:GetPropertyChangedSignal("Parent"):Connect(function()
+            Part1 = att1.Parent
+            if not isa(Part1, "BasePart") then
+                att1 = nil
+                Part1 = nil
+            end
+        end)
+        att1.Parent = Part1
+    end
+    
+    local function respawnrequest()
+        local ccfr, c = ws.CurrentCamera.CFrame, lp.Character
+        lp.Character = nil
+        lp.Character = c
+        local con = nil
+        con = ws.CurrentCamera.Changed:Connect(function(prop)
+            if (prop ~= "Parent") and (prop ~= "CFrame") then
+                return
+            end
+            ws.CurrentCamera.CFrame = ccfr
+            con:Disconnect()
+        end)
+    end
+    
+    local destroyhum = (method == 4) or (method == 5)
+    local breakjoints = (method == 0) or (method == 4)
+    local antirespawn = (method == 0) or (method == 2) or (method == 3)
+    
+    hatcollide = hatcollide and (method == 0)
+    
+    addtools = addtools and lp:FindFirstChildOfClass("Backpack")
+    
+    if type(simrad) ~= "number" then simrad = 1000 end
+    if shp and (simradius == "shp") then
+        tdelay(0, function()
+            while c do
+                shp(lp, "SimulationRadius", simrad)
+                heartbeat:Wait()
+            end
+        end)
+    elseif ssr and (simradius == "ssr") then
+        tdelay(0, function()
+            while c do
+                ssr(simrad)
+                heartbeat:Wait()
+            end
+        end)
+    end
+    
+    if antiragdoll then
+        antiragdoll = function(v)
+            if isa(v, "HingeConstraint") or isa(v, "BallSocketConstraint") then
+                v.Parent = nil
+            end
+        end
+        for i, v in pairs(getdescendants(c)) do
+            antiragdoll(v)
+        end
+        c.DescendantAdded:Connect(antiragdoll)
+    end
+    
+    if antirespawn then
+        respawnrequest()
+    end
+    
+    if method == 0 then
+        twait(loadtime)
+        if not c then
+            return
+        end
+    end
+    
+    if discharscripts then
+        for i, v in pairs(getdescendants(c)) do
+            if isa(v, "LocalScript") then
+                v.Disabled = true
+            end
+        end
+    elseif newanimate then
+        local animate = gp(c, "Animate", "LocalScript")
+        if animate and (not animate.Disabled) then
+            animate.Disabled = true
+        else
+            newanimate = false
+        end
+    end
+    
+    if addtools then
+        for i, v in pairs(getchildren(addtools)) do
+            if isa(v, "Tool") then
+                v.Parent = c
+            end
+        end
+    end
+    
+    pcall(function()
+        settings().Physics.AllowSleep = false
+        settings().Physics.PhysicsEnvironmentalThrottle = Enum.EnviromentalPhysicsThrottle.Disabled
+    end)
+    
+    local OLDscripts = {}
+    
+    for i, v in pairs(getdescendants(c)) do
+        if v.ClassName == "Script" then
+            OLDscripts[v.Name] = true
+        end
+    end
+    
+    local scriptNames = {}
+    
+    for i, v in pairs(getdescendants(c)) do
+        if isa(v, "BasePart") then
+            local newName, exists = tostring(i), true
+            while exists do
+                exists = OLDscripts[newName]
+                if exists then
+                    newName = newName .. "_"    
+                end
+            end
+            table.insert(scriptNames, newName)
+            Instance.new("Script", v).Name = newName
+        end
+    end
+    
+    local hum = c:FindFirstChildOfClass("Humanoid")
+    if hum then
+        for i, v in pairs(hum:GetPlayingAnimationTracks()) do
+            v:Stop()
+        end
+    end
+    c.Archivable = true
+    local cl = clone(c)
+    if hum and humState16 then
+        hum:ChangeState(Enum.HumanoidStateType.Physics)
+        if destroyhum then
+            twait(1.6)
+        end
+    end
+    if destroyhum then
+        pcall(destroy, hum)
+    end
+    
+    if not c then
+        return
+    end
+    
+    local head, torso, root = gp(c, "Head", "BasePart"), gp(c, "Torso", "BasePart") or gp(c, "UpperTorso", "BasePart"), gp(c, "HumanoidRootPart", "BasePart")
+    if hatcollide then
+        pcall(destroy, torso)
+        pcall(destroy, root)
+        pcall(destroy, c:FindFirstChildOfClass("BodyColors") or gp(c, "Health", "Script"))
+    end
+    
+    local model = Instance.new("Model", c)
+    model:GetPropertyChangedSignal("Parent"):Connect(function()
+        if not (model and model.Parent) then
+            model = nil
+        end
+    end)
+    
+    for i, v in pairs(getchildren(c)) do
+        if v ~= model then
+            if addtools and isa(v, "Tool") then
+                for i1, v1 in pairs(getdescendants(v)) do
+                    if v1 and v1.Parent and isa(v1, "BasePart") then
+                        local bv = Instance.new("BodyVelocity")
+                        bv.Velocity, bv.MaxForce, bv.P, bv.Name = v3_0, v3(1000, 1000, 1000), 1250, "bv_" .. v.Name
+                        bv.Parent = v1
+                    end
+                end
+            end
+            v.Parent = model
+        end
+    end
+    
+    if breakjoints then
+        model:BreakJoints()
+    else
+        if head and torso then
+            for i, v in pairs(getdescendants(model)) do
+                if isa(v, "JointInstance") then
+                    local save = false
+                    if (v.Part0 == torso) and (v.Part1 == head) then
+                        save = true
+                    end
+                    if (v.Part0 == head) and (v.Part1 == torso) then
+                        save = true
+                    end
+                    if save then
+                        if hedafterneck then
+                            hedafterneck = v
+                        end
+                    else
+                        pcall(destroy, v)
+                    end
+                end
+            end
+        end
+        if method == 3 then
+            task.delay(loadtime, pcall, model.BreakJoints, model)
+        end
+    end
+    
+    cl.Parent = ws
+    for i, v in pairs(getchildren(cl)) do
+        v.Parent = c
+    end
+    pcall(destroy, cl)
+    
+    local uncollide, noclipcon = nil, nil
+    if noclipAllParts then
+        uncollide = function()
+            if c then
+                for i, v in pairs(getdescendants(c)) do
+                    if isa(v, "BasePart") then
+                        v.CanCollide = false
+                    end
+                end
+            else
+                noclipcon:Disconnect()
+            end
+        end
+    else
+        uncollide = function()
+            if model then
+                for i, v in pairs(getdescendants(model)) do
+                    if isa(v, "BasePart") then
+                        v.CanCollide = false
+                    end
+                end
+            else
+                noclipcon:Disconnect()
+            end
+        end
+    end
+    noclipcon = stepped:Connect(uncollide)
+    uncollide()
+    
+    for i, scr in pairs(getdescendants(model)) do
+        if (scr.ClassName == "Script") and table.find(scriptNames, scr.Name) then
+            local Part0 = scr.Parent
+            if isa(Part0, "BasePart") then
+                for i1, scr1 in pairs(getdescendants(c)) do
+                    if (scr1.ClassName == "Script") and (scr1.Name == scr.Name) and (not scr1:IsDescendantOf(model)) then
+                        local Part1 = scr1.Parent
+                        if (Part1.ClassName == Part0.ClassName) and (Part1.Name == Part0.Name) then
+                            align(Part0, Part1)
+                            pcall(destroy, scr)
+                            pcall(destroy, scr1)
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    for i, v in pairs(getdescendants(c)) do
+        if v and v.Parent and (not v:IsDescendantOf(model)) then
+            if isa(v, "Decal") then
+                v.Transparency = 1
+            elseif isa(v, "BasePart") then
+                v.Transparency = 1
+                v.Anchored = false
+            elseif isa(v, "ForceField") then
+                v.Visible = false
+            elseif isa(v, "Sound") then
+                v.Playing = false
+            elseif isa(v, "BillboardGui") or isa(v, "SurfaceGui") or isa(v, "ParticleEmitter") or isa(v, "Fire") or isa(v, "Smoke") or isa(v, "Sparkles") then
+                v.Enabled = false
+            end
+        end
+    end
+    
+    if newanimate then
+        local animate = gp(c, "Animate", "LocalScript")
+        if animate then
+            animate.Disabled = false
+        end
+    end
+    
+    if addtools then
+        for i, v in pairs(getchildren(c)) do
+            if isa(v, "Tool") then
+                v.Parent = addtools
+            end
+        end
+    end
+    
+    local hum0, hum1 = model:FindFirstChildOfClass("Humanoid"), c:FindFirstChildOfClass("Humanoid")
+    if hum0 then
+        hum0:GetPropertyChangedSignal("Parent"):Connect(function()
+            if not (hum0 and hum0.Parent) then
+                hum0 = nil
+            end
+        end)
+    end
+    if hum1 then
+        hum1:GetPropertyChangedSignal("Parent"):Connect(function()
+            if not (hum1 and hum1.Parent) then
+                hum1 = nil
+            end
+        end)
+    
+        ws.CurrentCamera.CameraSubject = hum1
+        local camSubCon = nil
+        local function camSubFunc()
+            camSubCon:Disconnect()
+            if c and hum1 then
+                ws.CurrentCamera.CameraSubject = hum1
+            end
+        end
+        camSubCon = renderstepped:Connect(camSubFunc)
+        if hum0 then
+            hum0:GetPropertyChangedSignal("Jump"):Connect(function()
+                if hum1 then
+                    hum1.Jump = hum0.Jump
+                end
+            end)
+        else
+            respawnrequest()
+        end
+    end
+    
+    local rb = Instance.new("BindableEvent", c)
+    rb.Event:Connect(function()
+        pcall(destroy, rb)
+        sg:SetCore("ResetButtonCallback", true)
+        if destroyhum then
+            if c then c:BreakJoints() end
+            return
+        end
+        if model and hum0 and (hum0.Health > 0) then
+            model:BreakJoints()
+            hum0.Health = 0
+        end
+        if antirespawn then
+            respawnrequest()
+        end
+    end)
+    sg:SetCore("ResetButtonCallback", rb)
+    
+    tdelay(0, function()
+        while c do
+            if hum0 and hum1 then
+                hum1.Jump = hum0.Jump
+            end
+            wait()
+        end
+        sg:SetCore("ResetButtonCallback", true)
+    end)
+    
+    R15toR6 = R15toR6 and hum1 and (hum1.RigType == Enum.HumanoidRigType.R15)
+    if R15toR6 then
+        local part = gp(c, "HumanoidRootPart", "BasePart") or gp(c, "UpperTorso", "BasePart") or gp(c, "LowerTorso", "BasePart") or gp(c, "Head", "BasePart") or c:FindFirstChildWhichIsA("BasePart")
+        if part then
+            local cfr = part.CFrame
+            local R6parts = { 
+                head = {
+                    Name = "Head",
+                    Size = v3(2, 1, 1),
+                    R15 = {
+                        Head = 0
+                    }
+                },
+                torso = {
+                    Name = "Torso",
+                    Size = v3(2, 2, 1),
+                    R15 = {
+                        UpperTorso = 0.2,
+                        LowerTorso = -0.8
+                    }
+                },
+                root = {
+                    Name = "HumanoidRootPart",
+                    Size = v3(2, 2, 1),
+                    R15 = {
+                        HumanoidRootPart = 0
+                    }
+                },
+                leftArm = {
+                    Name = "Left Arm",
+                    Size = v3(1, 2, 1),
+                    R15 = {
+                        LeftHand = -0.849,
+                        LeftLowerArm = -0.174,
+                        LeftUpperArm = 0.415
+                    }
+                },
+                rightArm = {
+                    Name = "Right Arm",
+                    Size = v3(1, 2, 1),
+                    R15 = {
+                        RightHand = -0.849,
+                        RightLowerArm = -0.174,
+                        RightUpperArm = 0.415
+                    }
+                },
+                leftLeg = {
+                    Name = "Left Leg",
+                    Size = v3(1, 2, 1),
+                    R15 = {
+                        LeftFoot = -0.85,
+                        LeftLowerLeg = -0.29,
+                        LeftUpperLeg = 0.49
+                    }
+                },
+                rightLeg = {
+                    Name = "Right Leg",
+                    Size = v3(1, 2, 1),
+                    R15 = {
+                        RightFoot = -0.85,
+                        RightLowerLeg = -0.29,
+                        RightUpperLeg = 0.49
+                    }
+                }
+            }
+            for i, v in pairs(getchildren(c)) do
+                if isa(v, "BasePart") then
+                    for i1, v1 in pairs(getchildren(v)) do
+                        if isa(v1, "Motor6D") then
+                            v1.Part0 = nil
+                        end
+                    end
+                end
+            end
+            part.Archivable = true
+            for i, v in pairs(R6parts) do
+                local part = clone(part)
+                part:ClearAllChildren()
+                part.Name, part.Size, part.CFrame, part.Anchored, part.Transparency, part.CanCollide = v.Name, v.Size, cfr, false, 1, false
+                for i1, v1 in pairs(v.R15) do
+                    local R15part = gp(c, i1, "BasePart")
+                    local att = gp(R15part, "att1_" .. i1, "Attachment")
+                    if R15part then
+                        local weld = Instance.new("Weld")
+                        weld.Part0, weld.Part1, weld.C0, weld.C1, weld.Name = part, R15part, cf(0, v1, 0), cf_0, "Weld_" .. i1
+                        weld.Parent = R15part
+                        R15part.Massless, R15part.Name = true, "R15_" .. i1
+                        R15part.Parent = part
+                        if att then
+                            att.Position = v3(0, v1, 0)
+                            att.Parent = part
+                        end
+                    end
+                end
+                part.Parent = c
+                R6parts[i] = part
+            end
+            local R6joints = {
+                neck = {
+                    Parent = R6parts.torso,
+                    Name = "Neck",
+                    Part0 = R6parts.torso,
+                    Part1 = R6parts.head,
+                    C0 = cf(0, 1, 0, -1, 0, 0, 0, 0, 1, 0, 1, -0),
+                    C1 = cf(0, -0.5, 0, -1, 0, 0, 0, 0, 1, 0, 1, -0)
+                },
+                rootJoint = {
+                    Parent = R6parts.root,
+                    Name = "RootJoint" ,
+                    Part0 = R6parts.root,
+                    Part1 = R6parts.torso,
+                    C0 = cf(0, 0, 0, -1, 0, 0, 0, 0, 1, 0, 1, -0),
+                    C1 = cf(0, 0, 0, -1, 0, 0, 0, 0, 1, 0, 1, -0)
+                },
+                rightShoulder = {
+                    Parent = R6parts.torso,
+                    Name = "Right Shoulder",
+                    Part0 = R6parts.torso,
+                    Part1 = R6parts.rightArm,
+                    C0 = cf(1, 0.5, 0, 0, 0, 1, 0, 1, -0, -1, 0, 0),
+                    C1 = cf(-0.5, 0.5, 0, 0, 0, 1, 0, 1, -0, -1, 0, 0)
+                },
+                leftShoulder = {
+                    Parent = R6parts.torso,
+                    Name = "Left Shoulder",
+                    Part0 = R6parts.torso,
+                    Part1 = R6parts.leftArm,
+                    C0 = cf(-1, 0.5, 0, 0, 0, -1, 0, 1, 0, 1, 0, 0),
+                    C1 = cf(0.5, 0.5, 0, 0, 0, -1, 0, 1, 0, 1, 0, 0)
+                },
+                rightHip = {
+                    Parent = R6parts.torso,
+                    Name = "Right Hip",
+                    Part0 = R6parts.torso,
+                    Part1 = R6parts.rightLeg,
+                    C0 = cf(1, -1, 0, 0, 0, 1, 0, 1, -0, -1, 0, 0),
+                    C1 = cf(0.5, 1, 0, 0, 0, 1, 0, 1, -0, -1, 0, 0)
+                },
+                leftHip = {
+                    Parent = R6parts.torso,
+                    Name = "Left Hip" ,
+                    Part0 = R6parts.torso,
+                    Part1 = R6parts.leftLeg,
+                    C0 = cf(-1, -1, 0, 0, 0, -1, 0, 1, 0, 1, 0, 0),
+                    C1 = cf(-0.5, 1, 0, 0, 0, -1, 0, 1, 0, 1, 0, 0)
+                }
+            }
+            for i, v in pairs(R6joints) do
+                local joint = Instance.new("Motor6D")
+                for prop, val in pairs(v) do
+                    joint[prop] = val
+                end
+                R6joints[i] = joint
+            end
+            if hum1 then
+                hum1.RigType, hum1.HipHeight = Enum.HumanoidRigType.R6, 0
+            end
+        end
+    end
+    
+    local torso1 = torso
+    torso = gp(c, "Torso", "BasePart") or ((not R15toR6) and gp(c, torso.Name, "BasePart"))
+    if (typeof(hedafterneck) == "Instance") and head and torso and torso1 then
+        local conNeck, conTorso, conTorso1 = nil, nil, nil
+        local aligns = {}
+        local function enableAligns()
+            conNeck:Disconnect()
+            conTorso:Disconnect()
+            conTorso1:Disconnect()
+            for i, v in pairs(aligns) do
+                v.Enabled = true
+            end
+        end
+        conNeck = hedafterneck.Changed:Connect(function(prop)
+            if table.find({"Part0", "Part1", "Parent"}, prop) then
+                enableAligns()
+            end
+        end)
+        conTorso = torso:GetPropertyChangedSignal("Parent"):Connect(enableAligns)
+        conTorso1 = torso1:GetPropertyChangedSignal("Parent"):Connect(enableAligns)
+        for i, v in pairs(getdescendants(head)) do
+            if isa(v, "AlignPosition") or isa(v, "AlignOrientation") then
+                i = tostring(i)
+                aligns[i] = v
+                v:GetPropertyChangedSignal("Parent"):Connect(function()
+                    aligns[i] = nil
+                end)
+                v.Enabled = false
+            end
+        end
+    end
+    
+
+    local flingpart0 = gp(model, flingpart, "BasePart") or gp(gp(model, flingpart, "Accessory"), "Handle", "BasePart")
+    local flingpart1 = gp(c, flingpart, "BasePart") or gp(gp(c, flingpart, "Accessory"), "Handle", "BasePart")
+    
+    
+    local fling = function() end
+    if flingpart0 and flingpart1 then
+        flingpart0:GetPropertyChangedSignal("Parent"):Connect(function()
+            if not (flingpart0 and flingpart0.Parent) then
+                flingpart0 = nil
+                fling = function() end
+            end
+        end)
+        flingpart0.Archivable = true
+        flingpart1:GetPropertyChangedSignal("Parent"):Connect(function()
+            if not (flingpart1 and flingpart1.Parent) then
+                flingpart1 = nil
+                fling = function() end
+            end
+        end)
+        if (condition) then
+    fling = function() end
+end
+        local att0 = gp(flingpart0, "att0_" .. flingpart0.Name, "Attachment")
+        local att1 = gp(flingpart1, "att1_" .. flingpart1.Name, "Attachment")
+        if att0 and att1 then
+            att0:GetPropertyChangedSignal("Parent"):Connect(function()
+                if not (att0 and att0.Parent) then
+                    att0 = nil
+                    fling = function() end
+                end
+            end)
+            att1:GetPropertyChangedSignal("Parent"):Connect(function()
+                if not (att1 and att1.Parent) then
+                    att1 = nil
+                    fling = function() end
+                end
+            end)
+            local lastfling = nil
+            local mouse = lp:GetMouse()
+            fling = function(target, duration, rotVelocity)
+                if typeof(target) == "Instance" then
+                    if isa(target, "BasePart") then
+                        target = target.Position
+                    elseif isa(target, "Model") then
+                        target = gp(target, "HumanoidRootPart", "BasePart") or gp(target, "Torso", "BasePart") or gp(target, "UpperTorso", "BasePart") or target:FindFirstChildWhichIsA("BasePart")
+                        if target then
+                            target = target.Position
+                        else
+                            return
+                        end
+                    elseif isa(target, "Humanoid") then
+                        target = target.Parent
+                        if not (target and isa(target, "Model")) then
+                            return
+                        end
+                        target = gp(target, "HumanoidRootPart", "BasePart") or gp(target, "Torso", "BasePart") or gp(target, "UpperTorso", "BasePart") or target:FindFirstChildWhichIsA("BasePart")
+                        if target then
+                            target = target.Position
+                        else
+                            return
+                        end
+                    else
+                        return
+                    end
+                elseif typeof(target) == "CFrame" then
+                    target = target.Position
+                elseif typeof(target) ~= "Vector3" then
+                    target = mouse.Hit
+                    if target then
+                        target = target.Position
+                    else
+                        return
+                    end
+                end
+                if target.Y < ws.FallenPartsDestroyHeight + 5 then
+                    target = v3(target.X, ws.FallenPartsDestroyHeight + 5, target.Z)
+                end
+                lastfling = target
+                if type(duration) ~= "number" then
+                    duration = tonumber(duration) or 0.5
+                end
+                if typeof(rotVelocity) ~= "Vector3" then
+                    rotVelocity = v3(20000, 20000, 20000)
+                end
+                if not (target and flingpart0 and flingpart1 and att0 and att1) then
+                    return
+                end
+                flingpart0.Archivable = true
+                local flingpart = clone(flingpart0)
+                flingpart.Transparency = 0
+                flingpart.CanCollide = true
+                flingpart.Name = "flingpart_" .. flingpart0.Name
+                flingpart.Anchored = true
+                flingpart.Velocity = v3_0
+                flingpart.RotVelocity = v3_0
+                flingpart.Position = target
+                flingpart:GetPropertyChangedSignal("Parent"):Connect(function()
+                    if not (flingpart and flingpart.Parent) then
+                        flingpart = nil
+                    end
+                end)
+                flingpart.Parent = flingpart1
+                if flingpart0.Transparency > 0 then
+                    flingpart0.Transparency = 0
+                end
+                att1.Parent = flingpart
+                local con = nil
+                local rotchg = v3(0, rotVelocity.Unit.Y * 1000, 0)
+                con = heartbeat:Connect(function(delta)
+                    if target and (lastfling == target) and flingpart and flingpart0 and flingpart1 and att0 and att1 then
+                        flingpart.Orientation += rotchg * delta
+                        flingpart0.RotVelocity = rotVelocity
+                    else
+                        con:Disconnect()
+                    end
+                end)
+                if alignmode ~= 4 then
+                    local con = nil
+                    con = renderstepped:Connect(function()
+                        if flingpart0 and target then
+                            flingpart0.RotVelocity = v3_0
+                        else
+                            con:Disconnect()
+                        end
+                    end)
+                end
+                twait(duration)
+                if lastfling ~= target then
+                    if flingpart then
+                        if att1 and (att1.Parent == flingpart) then
+                            att1.Parent = flingpart1
+                        end
+                        pcall(destroy, flingpart)
+                    end
+                    return
+                end
+                target = nil
+                if not (flingpart and flingpart0 and flingpart1 and att0 and att1) then
+                    return
+                end
+                flingpart0.RotVelocity = v3_0
+                att1.Parent = flingpart1
+                pcall(destroy, flingpart)
+            end
+        end
+    end        
+
+    
+    lp:GetMouse().Button1Down:Connect(fling) --click fling
+
+
+    
+    
+    
+    
+--body parts
+
+local head = gp(c, "Head", "BasePart")
+if not head then return print("head not found") end
+
+local torso = gp(c, "Torso", "BasePart")
+if not torso then return print("torso not found") end
+
+local humanoidRootPart = gp(c, "HumanoidRootPart", "BasePart")
+if not humanoidRootPart then return print("humanoid root part not found") end
+
+local leftArm = gp(c, "Left Arm", "BasePart")
+if not leftArm then return print("left arm not found") end
+
+local rightArm = gp(c, "Right Arm", "BasePart")
+if not rightArm then return print("right arm not found") end
+
+local leftLeg = gp(c, "Left Leg", "BasePart")
+if not leftLeg then return print("left leg not found") end
+
+local rightLeg = gp(c, "Right Leg", "BasePart")
+if not rightLeg then return print("right leg not found") end
+
+--rig joints
+
+local Neck = gp(torso, "Neck", "Motor6D")
+if not Neck then return print("Neck not found") end
+
+local RootJoint = gp(humanoidRootPart, "RootJoint", "Motor6D")
+if not RootJoint then return print("root joint not found") end
+
+local LeftShoulder = gp(torso, "Left Shoulder", "Motor6D")
+if not LeftShoulder then return print("left shoulder not found") end
+
+local RightShoulder = gp(torso, "Right Shoulder", "Motor6D")
+if not RightShoulder then return print("right shoulder not found") end
+
+local LeftHip = gp(torso, "Left Hip", "Motor6D")
+if not LeftHip then return print("left hip not found") end
+
+local RightHip = gp(torso, "Right Hip", "Motor6D")
+if not RightHip then return print("right hip not found") end
+
+
+local fps = 60
+local sinechange = 40 / fps
+local event = Instance.new("BindableEvent", c)
+event.Name = "renderstepped"
+local floor = math.floor
+fps = 1 / fps
+local tf = 0
+local con = nil
+con = game:GetService("RunService").RenderStepped:Connect(function(s)
+	if not c then
+		con:Disconnect()
+		return
+	end
+	tf = tf + s
+	if tf >= fps then
+		for i=1, floor(tf / fps) do
+		    tf = tf - fps
+			event:Fire(c)
+		end
+	end
+end)
+local event = event.Event
+
+
+game:GetService("Players").LocalPlayer.Character.Humanoid.WalkSpeed = 16
+
+
+local function stopIfRemoved(instance)
+    if not (instance and instance.Parent) then
+        c = nil
+        return
+    end
+    instance:GetPropertyChangedSignal("Parent"):Connect(function()
+        if not (instance and instance.Parent) then
+            c = nil
+        end
+    end)
+end
+stopIfRemoved(c)
+stopIfRemoved(hum)
+for i, v in pairs({head, torso, leftArm, rightArm, leftLeg, rightLeg, humanoidRootPart}) do
+    stopIfRemoved(v)
+end
+for i, v in pairs({Neck, RootJoint, LeftShoulder, RightShoulder, LeftHip, RightHip}) do
+    stopIfRemoved(v)
+end
+if not c then
+    return
+end
+
+
+
+
+--Local Section
+
+local mode = false
+uis = game:GetService("UserInputService")
+local modes = {
+	[Enum.KeyCode.Q] = "q",
+	[Enum.KeyCode.E] = "e"
+}
+uis.InputBegan:Connect(function(keycode)
+    if uis:GetFocusedTextBox() then
+        return
+    end
+	keycode = keycode.KeyCode
+	if modes[keycode] ~= nil then
+		if mode == modes[keycode] then
+			mode = nil
+		else
+			mode = modes[keycode]
+		end
+	end
+end)
+
+local cf = CFrame.new
+local v3_101 = v3(1, 0, 1)
+local angles = CFrame.fromEulerAnglesXYZ
+local sin = math.sin
+local sine = 0
+local attack = false
+local mouse = lp:GetMouse()
+local con = nil
+local attackCounter = 0
+
+local function IT1()
+
+LeftHip.C0 = LeftHip.C0:Lerp(cf(-1, -1 + 0.1 * sin(sine * 1), 0) * angles(0, -1.3962634015954636, 0), 0.2)  LeftShoulder.C0 = LeftShoulder.C0:Lerp(cf(-0.7, 0.5, 0.3) * angles(1.0471975511965976, -1.0471975511965976, 1.5707963267948966), 0.2)  RootJoint.C0 = RootJoint.C0:Lerp(cf(0, 0.1 - 0.1 * sin(sine * 1), 0) * angles(-1.5707963267948966, 0, 3.490658503988659), 0.2)  RightHip.C0 = RightHip.C0:Lerp(cf(1, -1 + 0.1 * sin(sine * 1), 0) * angles(0, 1.3962634015954636, 0), 0.2)  Neck.C0 = Neck.C0:Lerp(cf(0, 1, 0) * angles(-1.5707963267948966, 0, 2.792526803190927), 0.2)  RightShoulder.C0 = RightShoulder.C0:Lerp(cf(1, 0.5, 0) * angles(0, 1.2217304763960306, 1.5707963267948966), 0.2)  --LeftLeg,-1,0,0,1,-0,0,0,1,-1,0.1,0,1,-80,0,0,1,0,0,0,1,0,0,0,1,LeftArm,-0.7,0,0,1,60,0,0,1,0.5,0,0,1,-60,0,0,1,0.3,0,0,1,90,0,0,1,Torso,0,0,0,1,-90,0,0,1,0.1,-0.1,0,1,-0,0,0,1,0,0,0,1,200,0,0,1,RightLeg,1,0,0,1,0,0,0,1,-1,0.1,0,1,80,0,0,1,0,0,0,1,0,0,0,1,Head,0,0,0,1,-90,0,0,1,1,0,0,1,-0,0,0,1,0,0,0,1,160,0,0,1,RightArm,1,0,0,1,0,0,0,1,0.5,0,0,1,70,0,0,1,0,0,0,1,90,0,0,1
+end
+
+local function WT1()
+RootJoint.C0 = RootJoint.C0:Lerp(cf(0, 0.1 - 0.1 * sin((sine + 2) * 1), 0) * angles(-1.5707963267948966, 0, 3.141592653589793), 0.2)  LeftShoulder.C0 = LeftShoulder.C0:Lerp(cf(-0.7, 0.5, 0.3) * angles(1.0471975511965976, -1.0471975511965976, 1.5707963267948966), 0.2)  RightShoulder.C0 = RightShoulder.C0:Lerp(cf(1, 0.5, 0) * angles(0, 1.5707963267948966, 2.6179938779914944), 0.2)  Neck.C0 = Neck.C0:Lerp(cf(0, 1, 0) * angles(-1.5707963267948966, 0, 3.141592653589793), 0.2)  RightHip.C0 = RightHip.C0:Lerp(cf(1, -1 + 0.1 * sin(sine * 0.5), 0) * angles(0, 1.3962634015954636, 0.6981317007977318 * sin(sine * 0.5)), 0.2)  LeftHip.C0 = LeftHip.C0:Lerp(cf(-1, -1 + 0.1 * sin(sine * 0.5), 0) * angles(0, -1.3962634015954636, 0.6981317007977318 * sin(sine * 0.5)), 0.2)  --Torso,0,0,0,0.5,-90,0,0,0.5,0.1,-0.1,2,1,-0,0,0,0.5,0,0,0,0.5,180,0,0,0.5,LeftArm,-0.7,0,0,0.5,60,0,0,0.5,0.5,0,0,0.5,-60,0,0,0.5,0.3,0,0,0.5,90,0,0,0.5,RightArm,1,0,0,0.5,0,0,0,0.5,0.5,0,0,0.5,90,0,0,0.5,0,0,0,0.5,150,0,0,0.5,Head,0,0,0,0.5,-90,0,0,0.5,1,0,0,0.5,-0,0,0,0.5,0,0,0,0.5,180,0,0,0.5,RightLeg,1,0,0,0.5,0,0,0,0.5,-1,0.1,0,0.5,80,0,0,0.5,0,0,0,0.5,0,40,0,0.5,LeftLeg,-1,0,0,0.5,-0,0,0,0.5,-1,0.1,0,0.5,-80,0,0,0.5,0,0,0,0.5,0,40,0,0.5
+end
+
+local function WT2()
+
+RootJoint.C0 = RootJoint.C0:Lerp(cf(0, 0.1 - 0.1 * sin((sine + 2) * 1), 0) * angles(-1.5707963267948966, 0, 3.490658503988659), 0.2)  LeftShoulder.C0 = LeftShoulder.C0:Lerp(cf(-0.7, 0.5, 0.3) * angles(1.0471975511965976, -1.0471975511965976, 1.5707963267948966), 0.2)  RightShoulder.C0 = RightShoulder.C0:Lerp(cf(1, 0.5, 0) * angles(0, 1.2217304763960306, 1.5707963267948966), 0.2)  Neck.C0 = Neck.C0:Lerp(cf(0, 1, 0) * angles(-1.5707963267948966, 0, 2.792526803190927), 0.2)  RightHip.C0 = RightHip.C0:Lerp(cf(1, -1 + 0.1 * sin(sine * 0.5), 0) * angles(0, 1.3962634015954636, 0.6981317007977318 * sin(sine * 0.5)), 0.2)  LeftHip.C0 = LeftHip.C0:Lerp(cf(-1, -1 + 0.1 * sin(sine * 0.5), 0) * angles(0, -1.3962634015954636, 0.6981317007977318 * sin(sine * 0.5)), 0.2)  --Torso,0,0,0,0.5,-90,0,0,0.5,0.1,-0.1,2,1,-0,0,0,0.5,0,0,0,0.5,200,0,0,0.5,LeftArm,-0.7,0,0,0.5,60,0,0,0.5,0.5,0,0,0.5,-60,0,0,0.5,0.3,0,0,0.5,90,0,0,0.5,RightArm,1,0,0,0.5,0,0,0,0.5,0.5,0,0,0.5,70,0,0,0.5,0,0,0,0.5,90,0,0,0.5,Head,0,0,0,0.5,-90,0,0,0.5,1,0,0,0.5,-0,0,0,0.5,0,0,0,0.5,160,0,0,0.5,RightLeg,1,0,0,0.5,0,0,0,0.5,-1,0.1,0,0.5,80,0,0,0.5,0,0,0,0.5,0,40,0,0.5,LeftLeg,-1,0,0,0.5,-0,0,0,0.5,-1,0.1,0,0.5,-80,0,0,0.5,0,0,0,0.5,0,40,0,0.5
+end
+
+local function IT2()
+
+RootJoint.C0 = RootJoint.C0:Lerp(cf(0, 0.1 - 0.1 * sin(sine * 1), 0) * angles(-1.5707963267948966, 0, 3.141592653589793), 0.2)  RightShoulder.C0 = RightShoulder.C0:Lerp(cf(1, 0.5, 0) * angles(0, 1.5707963267948966, 2.6179938779914944), 0.2)  RightHip.C0 = RightHip.C0:Lerp(cf(1, -1 + 0.1 * sin(sine * 1), 0) * angles(0, 1.3962634015954636, 0), 0.2)  Neck.C0 = Neck.C0:Lerp(cf(0, 1, 0) * angles(-1.5707963267948966, 0, 3.141592653589793), 0.2)  LeftShoulder.C0 = LeftShoulder.C0:Lerp(cf(-0.7, 0.5, 0.3) * angles(1.0471975511965976, -1.0471975511965976, 1.5707963267948966), 0.2)  LeftHip.C0 = LeftHip.C0:Lerp(cf(-1, -1 + 0.1 * sin(sine * 1), 0) * angles(0, -1.3962634015954636, 0), 0.2)  --Torso,0,0,0,1,-90,0,0,1,0.1,-0.1,0,1,-0,0,0,1,0,0,0,1,180,0,0,1,RightArm,1,0,0,1,,0,0,1,0.5,0,0,1,90,0,0,1,0,0,0,1,150,0,0,1,RightLeg,1,0,0,1,0,0,0,1,-1,0.1,0,1,80,0,0,1,0,0,0,1,0,0,0,1,Head,0,0,0,1,-90,0,0,1,1,0,0,1,-0,0,0,1,0,0,0,1,180,0,0,1,LeftArm,-0.7,0,0,1,60,0,0,1,0.5,0,0,1,-60,0,0,1,0.3,0,0,1,90,0,0,1,LeftLeg,-1,0,0,1,-0,0,0,1,-1,0.1,0,1,-80,0,0,1,0,0,0,1,0,0,0,1
+end
+
+local function M1()
+
+RootJoint.C0 = RootJoint.C0:Lerp(cf(0, 0.03 * sin(sine * 1), 0) * angles(-1.6406094968746698, 0.026179938779914945 * sin(sine * 0.5), 3.839724354387525 + 0.06981317007977318 * sin(sine * 0.5)), 0.2)  RightHip.C0 = RightHip.C0:Lerp(cf(0.8 + 0.3 * sin(sine * 0.5), -1, 0.5) * angles(0, 0.8726646259971648, -0.17453292519943295 + 0.6981317007977318 * sin(sine * 0.5)), 0.2)  LeftHip.C0 = LeftHip.C0:Lerp(cf(-0.8 - 0.3 * sin(sine * 0.5), -1, -0.5) * angles(0, -2.2689280275926285, 0.17453292519943295 + 0.6981317007977318 * sin(sine * 0.5)), 0.2)  LeftShoulder.C0 = LeftShoulder.C0:Lerp(cf(-1, 0.5, 0) * angles(0, -1.5707963267948966 - 0.17453292519943295 * sin((sine + 1) * 0.5), -0.5235987755982988 * sin((sine + 1) * 0.5)), 0.2) Neck.C0 = Neck.C0:Lerp(cf(0, 1, 0) * angles(-1.5707963267948966, 0.026179938779914945 * sin(sine * 0.5), 2.443460952792061 - 0.08726646259971647 * sin(sine * 0.5)), 0.2)  RightShoulder.C0 = RightShoulder.C0:Lerp(cf(1, 0.3, 0) * angles(0, 0.8726646259971648 + 0.06981317007977318 * sin(sine * 0.5), 1.5707963267948966 - 0.06981317007977318 * sin((sine + 8) * 0.5)), 0.2)  --Torso,0,0,0,0.5,-94,0,0,0.5,0,0.03,0,1,-0,1.5,0,0.5,0,0,0,0.5,220,4,0,0.5,RightLeg,0.8,0.3,0,0.5,0,0,0,0.5,-1,0,0,0.5,50,0,0,0.5,0.5,0,2,0.5,-10,40,0,0.5,LeftLeg,-0.8,-0.3,0,0.5,-0,0,0,0.5,-1,0,0,0.5,-130,0,0,0.5,-0.5,0,2,0.5,10,40,0,0.5,LeftArm,-1,0,0,0.5,60,0,0,0.5,0.5,0,0,0.5,-60,-10,1,0.5,0,0,0,0.5,90,0,0,0.5,Head,0,0,0,0.5,-90,0,0,0.5,1,0,0,0.5,-0,1.5,0,0.5,0,0,0,0.5,140,-5,0,0.5,RightArm,1,0,0,0.5,0,0,0,0.5,0.3,0,0,0.5,50,4,0,0.5,0,0,0,0.5,90,-4,8,0.5
+end
+local function M2()
+
+RightShoulder.C0 = RightShoulder.C0:Lerp(cf(1, 0.3, 0) * angles(0, 0.8726646259971648 + 0.06981317007977318 * sin(sine * 0.5), 1.5707963267948966 - 0.06981317007977318 * sin((sine + 8) * 0.5)), 0.2)  LeftHip.C0 = LeftHip.C0:Lerp(cf(-1, -1, 0) * angles(0, -1.3962634015954636, 0), 0.2)  RootJoint.C0 = RootJoint.C0:Lerp(cf(0, 0, 0) * angles(-1.5707963267948966, 0, 3.839724354387525), 0.2)  LeftShoulder.C0 = LeftShoulder.C0:Lerp(cf(-1, 0.5, 0) * angles(1.0471975511965976, -1.0471975511965976 - 0.17453292519943295 * sin((sine + 1) * 0.5), 1.5707963267948966), 0.2)  RightHip.C0 = RightHip.C0:Lerp(cf(1, -1, 0) * angles(0, 1.3962634015954636, 0), 0.2)  Neck.C0 = Neck.C0:Lerp(cf(0, 1, 0) * angles(-1.5707963267948966, 0.026179938779914945 * sin(sine * 0.5), 2.443460952792061 - 0.08726646259971647 * sin(sine * 0.5)), 0.2)  --RightArm,1,0,0,0.5,0,0,0,0.5,0.3,0,0,0.5,50,4,0,0.5,0,0,0,0.5,90,-4,8,0.5,LeftLeg,-1,0,0,0.5,-0,0,0,0.5,-1,0,0,0.5,-80,0,0,0.5,0,0,2,0.5,0,0,0,0.5,Torso,0,0,0,0.5,-90,0,0,0.5,0,0,0,1,-0,0,0,0.5,0,0,0,0.5,220,0,0,0.5,LeftArm,-1,0,0,0.5,60,0,0,0.5,0.5,0,0,0.5,-60,-10,1,0.5,0,0,0,0.5,90,0,0,0.5,RightLeg,1,0,0,0.5,0,0,0,0.5,-1,0,0,0.5,80,0,0,0.5,0,0,2,0.5,0,0,0,0.5,Head,0,0,0,0.5,-90,0,0,0.5,1,0,0,0.5,-0,1.5,0,0.5,0,0,0,0.5,140,-5,0,0.5
+end
+
+
+con = mouse.Button1Down:Connect(function()
+    if mode == "e" then
+        if (game.Players.LocalPlayer.Character.Humanoid.MoveDirection * Vector3.new(1, 0, 1)).magnitude > .5 then -- check if moving
+            if not attack then -- only execute attack if not on cooldown
+                attack = true
+                for i=1, 20 do
+                    if event:Wait() then
+                        WT1()
+                    else
+                        break
+                    end
+                end
+                for i=1, 20 do
+                    if event:Wait() then
+                        WT2()
+                    else
+                        break
+                    end
+                end
+                attack = false
+            end
+        else -- not moving
+            if not attack then -- only execute attack if not on cooldown
+                attack = true
+                for i=1, 20 do
+                    if event:Wait() then
+                        IT2()
+                    else
+                        break
+                    end
+                end
+                for i=1, 20 do
+                    if event:Wait() then
+                        IT1()
+                    else
+                        break
+                    end
+                end
+                attack = false
+            end
+        end
+    else 
+        if (game.Players.LocalPlayer.Character.Humanoid.MoveDirection * Vector3.new(1, 0, 1)).magnitude > .5 then -- check if moving
+            if not attack then -- only execute attack if not on cooldown
+                attack = true
+                for i=1, 20 do
+                    if event:Wait() then
+                        M1()
+                    else
+                        break
+                    end
+                end
+                attack = false
+            end
+        else -- not moving
+            if not attack then -- only execute attack if not on cooldown
+                attack = true
+                for i=1, 20 do
+                    if event:Wait() then
+                        M2()
+                    else
+                        break
+                    end
+                end
+                attack = false
+            end
+        end
+    end
+end)
+
+
+
+
+while event:Wait() do
+sine += 0.2
+local vel = humanoidRootPart.Velocity.Y
+local torvel = (game.Players.LocalPlayer.Character.Humanoid.MoveDirection * Vector3.new(1, 0, 1)).magnitude
+if not attack then
+if mode == "e" then
+if torvel > .5 then
+
+LeftHip.C0 = LeftHip.C0:Lerp(cf(-1, -1 - 0.2 * sin(sine * 0.5), 0) * angles(0, -1.5707963267948966, 0.6981317007977318 * sin(sine * 0.5)), 0.2)  LeftShoulder.C0 = LeftShoulder.C0:Lerp(cf(-0.7, 0.5, 0.3) * angles(1.0471975511965976, -1.0471975511965976, 1.5707963267948966), 0.2)  RootJoint.C0 = RootJoint.C0:Lerp(cf(0, 0.1 + 0.1 * sin((sine + 1.5) * 1), 0) * angles(-1.6406094968746698, 0.03490658503988659 * sin(sine * 0.5), 3.141592653589793), 0.2)  RightHip.C0 = RightHip.C0:Lerp(cf(1, -1 + 0.2 * sin(sine * 0.5), 0) * angles(0, 1.5707963267948966, 0.6981317007977318 * sin(sine * 0.5)), 0.2)  Neck.C0 = Neck.C0:Lerp(cf(0, 1, 0) * angles(-1.5707963267948966, 0.05235987755982989 * sin(sine * 0.5), 3.141592653589793), 0.2)  RightShoulder.C0 = RightShoulder.C0:Lerp(cf(0.7, 0.5, 0.3) * angles(1.0471975511965976, 1.0471975511965976, -1.5707963267948966), 0.2)  --LeftLeg,-1,0,0,0.5,-0,0,0,0.5,-1,-0.2,0,0.5,-90,0,0,0.5,0,0,0,0.5,0,40,0,0.5,LeftArm,-0.7,0,0,0.5,60,0,0,0.5,0.5,0,0,0.5,-60,0,0,0.5,0.3,0,0,0.5,90,0,0,0.5,Torso,0,0,0,0.5,-94,0,0,0.5,0.1,0.1,1.5,1,-0,2,0,0.5,0,0,0,0.5,180,0,0,0.5,RightLeg,1,0,0,0.5,0,0,0,0.5,-1,0.2,0,0.5,90,0,0,0.5,0,0,0,0.5,0,40,0,0.5,Head,0,0,0,0.5,-90,0,0,0.5,1,0,0,0.5,-0,3,0,0.5,0,0,0,0.5,180,0,0,0.5,RightArm,0.7,0,0,0.5,60,0,0,0.5,0.5,0,0,0.5,60,0,0,0.5,0.3,0,0,0.5,-90,0,0,0.5
+else
+
+LeftShoulder.C0 = LeftShoulder.C0:Lerp(cf(-0.7, 0.5, 0.3) * angles(1.0471975511965976, -1.0471975511965976, 1.5707963267948966), 0.2)  LeftHip.C0 = LeftHip.C0:Lerp(cf(-1, -1 + 0.1 * sin(sine * 1), 0) * angles(0, -1.3962634015954636, 0), 0.2)  RightShoulder.C0 = RightShoulder.C0:Lerp(cf(0.7, 0.5, 0.3) * angles(1.0471975511965976, 1.0471975511965976, -1.5707963267948966), 0.2)  Neck.C0 = Neck.C0:Lerp(cf(0, 1, 0) * angles(-1.5707963267948966, 0, 3.141592653589793), 0.2)  RootJoint.C0 = RootJoint.C0:Lerp(cf(0, 0.1 - 0.1 * sin(sine * 1), 0) * angles(-1.5707963267948966, 0, 3.141592653589793), 0.2)  RightHip.C0 = RightHip.C0:Lerp(cf(1, -1 + 0.1 * sin(sine * 1), 0) * angles(0, 1.3962634015954636, 0), 0.2)  --LeftArm,-0.7,0,0,1,60,0,0,1,0.5,0,0,1,-60,0,0,1,0.3,0,0,1,90,0,0,1,LeftLeg,-1,0,0,1,-0,0,0,1,-1,0.1,0,1,-80,0,0,1,0,0,0,1,0,0,0,1,RightArm,0.7,0,0,1,60,0,0,1,0.5,0,0,1,60,0,0,1,0.3,0,0,1,-90,0,0,1,Head,0,0,0,1,-90,0,0,1,1,0,0,1,-0,0,0,1,0,0,0,1,180,0,0,1,Torso,0,0,0,1,-90,0,0,1,0.1,-0.1,0,1,-0,0,0,1,0,0,0,1,180,0,0,1,RightLeg,1,0,0,1,0,0,0,1,-1,0.1,0,1,80,0,0,1,0,0,0,1,0,0,0,1
+end
+else
+if torvel > .5 then
+-- walk
+
+		RootJoint.C0 = RootJoint.C0:Lerp(cf(0, 0.03 * sin(sine * 1), 0) * angles(-1.6406094968746698, 0.026179938779914945 * sin(sine * 0.5), 3.141592653589793 + 0.06981317007977318 * sin(sine * 0.5)), 0.2)  RightHip.C0 = RightHip.C0:Lerp(cf(1, -1, -0.3 * sin((sine + 2) * 0.5)) * angles(0, 1.5707963267948966, -0.17453292519943295 + 0.6981317007977318 * sin(sine * 0.5)), 0.2)  LeftHip.C0 = LeftHip.C0:Lerp(cf(-1, -1, 0.3 * sin((sine + 2) * 0.5)) * angles(0, -1.5707963267948966, 0.17453292519943295 + 0.6981317007977318 * sin(sine * 0.5)), 0.2)  Neck.C0 = Neck.C0:Lerp(cf(0, 1, 0) * angles(-1.5707963267948966, 0.026179938779914945 * sin(sine * 0.5), 3.141592653589793 - 0.08726646259971647 * sin(sine * 0.5)), 0.2)  RightShoulder.C0 = RightShoulder.C0:Lerp(cf(1, 0.3, 0) * angles(0, 1.3962634015954636 + 0.06981317007977318 * sin(sine * 0.5), 1.9198621771937625 - 0.06981317007977318 * sin((sine + 8) * 0.5)), 0.2)  LeftShoulder.C0 = LeftShoulder.C0:Lerp(cf(-1, 0.5, 0) * angles(0, -1.5707963267948966 - 0.17453292519943295 * sin((sine + 1) * 0.5), -0.5235987755982988 * sin((sine + 1) * 0.5)), 0.2)  --Torso,0,0,0,0.5,-94,0,0,0.5,0,0.03,0,1,-0,1.5,0,0.5,0,0,0,0.5,180,4,0,0.5,RightLeg,1,0,0,0.5,0,0,0,0.5,-1,0,0,0.5,90,0,0,0.5,0,-0.3,2,0.5,-10,40,0,0.5,LeftLeg,-1,0,0,0.5,-0,0,0,0.5,-1,0,0,0.5,-90,0,0,0.5,0,0.3,2,0.5,10,40,0,0.5,Head,0,0,0,0.5,-90,0,0,0.5,1,0,0,0.5,-0,1.5,0,0.5,0,0,0,0.5,180,-5,0,0.5,RightArm,1,0,0,0.5,0,0,0,0.5,0.3,0,0,0.5,80,4,0,0.5,0,0,0,0.5,110,-4,8,0.5,LeftArm,-1,0,0,0.5,-0,0,0,0.5,0.5,0,0,0.5,-90,-10,1,0.5,0,0,0,0.5,0,-30,1,0.5
+else
+-- idle
+
+RightShoulder.C0 = RightShoulder.C0:Lerp(cf(1, 0.2 - 0.1 * sin((sine - 4) * 0.25), 0) * angles(0.06981317007977318 * sin(sine * 0.25), 1.3962634015954636, 1.9198621771937625 + 0.05235987755982989 * sin((sine + 2) * 0.25)), 0.2)  RightHip.C0 = RightHip.C0:Lerp(cf(1, -1 + 0.1 * sin(sine * 0.25), 0) * angles(0, 1.3962634015954636, 0), 0.2)  LeftShoulder.C0 = LeftShoulder.C0:Lerp(cf(-1, 0.5 - 0.05 * sin((sine - 4) * 0.25), 0) * angles(1.5707963267948966, -1.6580627893946132 - 0.06981317007977318 * sin(sine * 0.25), 1.5707963267948966), 0.2)  Neck.C0 = Neck.C0:Lerp(cf(0, 1, 0) * angles(-1.5707963267948966 + 0.08726646259971647 * sin((sine + 4) * 0.25), 0.05235987755982989 * sin(sine * 0.125), 3.3161255787892263), 0.2)  LeftHip.C0 = LeftHip.C0:Lerp(cf(-1, -1 + 0.1 * sin(sine * 0.25), 0) * angles(-0.17453292519943295, -1.3962634015954636, -0.17453292519943295), 0.2)  RootJoint.C0 = RootJoint.C0:Lerp(cf(0, 0.1 - 0.1 * sin(sine * 0.25), 0) * angles(-1.5707963267948966, 0, 2.9670597283903604), 0.2)  --RightArm,1,0,0,0.25,0,4,0,0.25,0.2,-0.1,-4,0.25,80,0,0,0.25,0,0,0,0.25,110,3,2,0.25,RightLeg,1,0,0,0.25,-0,0,0,0.25,-1,0.1,0,0.25,80,0,0,0.25,0,0,0,0.25,0,0,0,0.25,LeftArm,-1,0,0,0.25,90,0,0,0.25,0.5,-0.05,-4,0.25,-95,-4,0,0.25,0,0,0,0.25,90,0,0,0.25,Head,0,0,0,0.25,-90,5,4,0.25,1,0,0,0.25,-0,3,0,0.125,0,0,0,0.25,190,0,0,0.25,LeftLeg,-1,0,0,0.25,-10,0,0,0.25,-1,0.1,0,0.25,-80,0,0,0.25,0,0,0,0.25,-10,0,0,0.25,Torso,0,0,0,0.25,-90,0,0,0.25,0.1,-0.1,0,0.25,-0,0,0,0.25,0,0,0,0.25,170,0,0,0.25
+end
+end
+end
+end
